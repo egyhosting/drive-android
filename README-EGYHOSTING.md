@@ -11,7 +11,9 @@ Everything EgyHosting-specific is in one place, so upstream updates merge cleanl
 
 | Path | What |
 |---|---|
-| `app/build.gradle.kts` | flavor `egyhosting` (`com.egyhosting.drive`), Java from `src/generic`, optional release signing from env vars |
+| `app/build.gradle.kts` | flavor `egyhosting` (`com.egyhosting.drive`), Java from `src/generic`, optional release signing from env vars, document scanner (`appscan`) enabled |
+| `app/src/egyhosting/AndroidManifest.xml` | Google Play rules: no `REQUEST_INSTALL_PACKAGES`, no `MANAGE_EXTERNAL_STORAGE`, camera2 optional |
+| `app/src/main/java/com/nextcloud/utils/BuildHelper.kt` | `isFlavourGPlay()` is also true for `egyhosting` (upstream's branded-Play behaviour) |
 | `app/src/egyhosting/res/values/setup.xml` | app name, provider ids, fixed server login, colours, links |
 | `app/src/egyhosting/res/values*/egd_strings.xml` | upstream strings that hardcode "Nextcloud" |
 | `app/src/egyhosting/res/mipmap-*`, `drawable*` | launcher icon, splash and logos (replace the Nextcloud trademark artwork) |
