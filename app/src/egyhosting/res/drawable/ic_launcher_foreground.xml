@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ~ SPDX-FileCopyrightText: 2026 EgyHosting
+  ~ SPDX-License-Identifier: AGPL-3.0-or-later OR GPL-2.0-only
+  ~
+  ~ Replaces the Nextcloud trademark icon (used by the splash screen).
+-->
+<bitmap xmlns:android="http://schemas.android.com/apk/res/android"
+    android:src="@mipmap/ic_launcher_foreground"
+    android:gravity="center" />

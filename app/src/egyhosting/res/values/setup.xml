@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ~ EgyHosting Drive - branded build of the Nextcloud Android client
+  ~
+  ~ SPDX-FileCopyrightText: 2026 EgyHosting
+  ~ SPDX-License-Identifier: AGPL-3.0-or-later OR GPL-2.0-only
+  ~
+  ~ Overrides values from app/src/main/res/values/setup.xml for the "egyhosting" flavor.
+  ~ Anything not listed here keeps the upstream value.
+-->
+<resources>
+    <!-- App name and ids. Authorities must differ from the official Nextcloud app,
+         otherwise both apps cannot be installed on the same phone. Never change after publishing. -->
+    <string name="app_name">EgyHosting Drive</string>
+    <string name="account_type">com.egyhosting.drive</string>
+    <string name="authority">com.egyhosting.drive.provider</string>
+    <string name="users_and_groups_search_authority">com.egyhosting.drive.providers.UsersAndGroupsSearchProvider</string>
+    <string name="users_and_groups_share_with">com.egyhosting.drive.providers.UsersAndGroupsSearchProvider.action.SHARE_WITH</string>
+    <string name="document_provider_authority">com.egyhosting.drive.documents</string>
+    <string name="file_provider_authority">com.egyhosting.drive.files</string>
+    <string name="image_cache_provider_authority">com.egyhosting.drive.imageCache.provider</string>
+    <string name="db_file">egyhostingdrive.db</string>
+    <string name="db_name">egyhostingdrive</string>
+    <string name="data_folder">EgyHostingDrive</string>
+    <string name="default_display_name_for_root_folder">EgyHosting Drive</string>
+
+    <!-- Login: always our server, through the browser login flow (no server address field). -->
+    <bool name="show_server_url_input">false</bool>
+    <bool name="show_provider_or_own_installation">false</bool>
+    <string name="provider_registration_server">https://egyhosting.com/drive.php</string>
+    <string name="webview_login_url" translatable="false">https://drive.egyhosting.com/index.php/login/v2</string>
+
+    <!-- Branded client: hides Nextcloud ecosystem app suggestions and community links. -->
+    <bool name="is_branded_client">true</bool>
+    <bool name="show_whats_new">false</bool>
+    <bool name="participate_enabled">false</bool>
+    <bool name="recommend_enabled">true</bool>
+
+    <!-- Colours (the server theme #005F90 is applied at runtime too) -->
+    <color name="primary">#005F90</color>
+    <color name="primary_dark">#0F2438</color>
+    <color name="color_accent">#005F90</color>
+    <color name="login_text_color">#ffffff</color>
+    <color name="login_text_hint_color">#B9CDE0</color>
+
+    <!-- Links -->
+    <string name="url_help">https://egyhosting.com/drive.php</string>
+    <string name="privacy_url">https://egyhosting.com/privacy.php</string>
+    <bool name="imprint_enabled">true</bool>
+    <string name="url_imprint">https://egyhosting.com/tos.php</string>
+    <string name="url_app_download">"https://play.google.com/store/apps/details?id=com.egyhosting.drive"</string>
+    <string name="url_server_install">https://egyhosting.com/drive.php</string>
+    <!-- GPL: the source of this build must stay public -->
+    <string name="sourcecode_url" translatable="false">https://github.com/egyhosting/drive-android</string>
+    <string name="help_link" translatable="false">https://egyhosting.com/submitticket.php</string>
+    <string name="report_issue_link" translatable="false">https://egyhosting.com/submitticket.php</string>
+    <string name="report_issue_empty_link" translatable="false">https://egyhosting.com/submitticket.php</string>
+    <string name="osm_geocoder_contact" translatable="false">info@egyhosting.com</string>
+
+    <!-- Splash screen title under the icon -->
+    <string name="splashScreenBold">EgyHosting</string>
+    <string name="splashScreenNormal"> Drive</string>
+</resources>

@@ -91,6 +91,20 @@ val ncTestServerPassword = configProps["NC_TEST_SERVER_PASSWORD"]
 val ncTestServerBaseUrl = configProps["NC_TEST_SERVER_BASEURL"]
 
 android {
+    // EgyHosting Drive release signing (upload key). Only set up when the CI secrets are present,
+    // so local and upstream builds are unaffected.
+    val egdKeystore = System.getenv("EGD_KEYSTORE_FILE")
+    if (!egdKeystore.isNullOrBlank() && file(egdKeystore).exists()) {
+        signingConfigs {
+            create("egyhosting") {
+                storeFile = file(egdKeystore)
+                storePassword = System.getenv("EGD_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("EGD_KEY_ALIAS")
+                keyPassword = System.getenv("EGD_KEY_PASSWORD")
+            }
+        }
+    }
+
     // install this NDK version and CMake to produce smaller APKs. Build will still work if not installed
     ndkVersion = "${ndkEnv["NDK_VERSION"]}"
     externalNativeBuild {
@@ -182,6 +196,14 @@ android {
                 versionCode = 1
                 versionName = "1"
             }
+
+            // EgyHosting Drive: branded build of the generic (no Google services) flavor.
+            // Resources in src/egyhosting override main; Java/Kotlin comes from src/generic.
+            register("egyhosting") {
+                applicationId = "com.egyhosting.drive"
+                dimension = "default"
+                signingConfigs.findByName("egyhosting")?.let { signingConfig = it }
+            }
         }
     }
 
@@ -242,6 +264,9 @@ android {
         // Adds exported schema location as test app assets.
         getByName("androidTest") {
             assets.srcDirs(files("$projectDir/schemas"))
+        }
+        getByName("egyhosting") {
+            java.srcDirs("src/generic/java")
         }
     }
 
