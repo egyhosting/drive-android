@@ -379,7 +379,8 @@ val qaImplementationConfiguration = "qaImplementation"
 val appScanConfigurations = listOf(
     gplayImplementationConfiguration,
     huaweiImplementationConfiguration,
-    qaImplementationConfiguration
+    qaImplementationConfiguration,
+    "egyhostingImplementation" // EgyHosting: document scanner (Play build, OpenCV binaries are fine there)
 )
 
 dependencies {
