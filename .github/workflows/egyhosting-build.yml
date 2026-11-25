@@ -66,7 +66,20 @@ jobs:
           EGD_KEYSTORE_PASSWORD: ${{ secrets.EGD_KEYSTORE_PASSWORD }}
           EGD_KEY_ALIAS: ${{ secrets.EGD_KEY_ALIAS }}
           EGD_KEY_PASSWORD: ${{ secrets.EGD_KEY_PASSWORD }}
-        run: ./gradlew --no-daemon assembleEgyhostingDebug assembleEgyhostingRelease bundleEgyhostingRelease
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon assembleEgyhostingDebug assembleEgyhostingRelease bundleEgyhostingRelease 2>&1 | tee "$RUNNER_TEMP/gradle.log"
+
+      # Job logs need a GitHub login to read; annotations are public, so surface the Gradle error there.
+      - name: Report Gradle error
+        if: failure()
+        run: |
+          f="$RUNNER_TEMP/gradle.log"
+          [ -f "$f" ] || exit 0
+          msg=$( { grep -n -A25 "What went wrong" "$f" || true; grep -nE "^e: |error:|ERROR:|AAPT: error" "$f" | head -40 || true; } | head -c 30000)
+          [ -n "$msg" ] || msg=$(tail -n 80 "$f")
+          msg="${msg//'%'/'%25'}"; msg="${msg//$'\r'/}"; msg="${msg//$'\n'/'%0A'}"
+          echo "::error title=Gradle build failed::$msg"
 
       - name: Remove keystore
         if: always()

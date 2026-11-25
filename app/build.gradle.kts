@@ -265,7 +265,7 @@ android {
         getByName("androidTest") {
             assets.srcDirs(files("$projectDir/schemas"))
         }
-        getByName("egyhosting") {
+        maybeCreate("egyhosting").apply {
             java.srcDirs("src/generic/java")
         }
     }
