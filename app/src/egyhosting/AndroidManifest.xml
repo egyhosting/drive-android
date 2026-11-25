@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ~ EgyHosting Drive - flavor manifest overrides for Google Play
+  ~
+  ~ SPDX-FileCopyrightText: 2026 EgyHosting
+  ~ SPDX-License-Identifier: AGPL-3.0-or-later OR GPL-2.0-only
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+          xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Play policy: installing APKs is not a core feature of a file-sync app (same as upstream gplay). -->
+    <uses-permission
+        android:name="android.permission.REQUEST_INSTALL_PACKAGES"
+        tools:node="remove"/>
+
+    <!-- Play only grants "All files access" after a manual declaration review, which branded
+         clients rarely pass. Without it the app uses media permissions + the system file picker
+         (upstream handles this for branded Play builds, see BuildHelper.isFlavourGPlay). -->
+    <uses-permission
+        android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:node="remove"/>
+
+    <!-- Used for document scanning, but the lib declares it as required, which it's not
+         (otherwise Play hides the app on devices without camera2). Same as upstream gplay. -->
+    <uses-feature
+        android:name="android.hardware.camera2"
+        android:required="false"
+        tools:node="replace" />
+
+</manifest>
