@@ -266,7 +266,9 @@ android {
             assets.srcDirs(files("$projectDir/schemas"))
         }
         maybeCreate("egyhosting").apply {
+            // src/generic/java holds both .java and .kt files; AGP compiles Kotlin from its own dir list.
             java.srcDirs("src/generic/java")
+            kotlin.srcDirs("src/generic/java")
         }
     }
 
