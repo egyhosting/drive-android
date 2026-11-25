@@ -1,0 +1,323 @@
+/*
+ * Nextcloud - Android Client
+ *
+ * SPDX-FileCopyrightText: 2025 Alper Ozturk <alper.ozturk@nextcloud.com>
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ */
+
+package com.nextcloud.utils.extensions
+
+import com.nextcloud.client.database.dao.FileDao
+import com.nextcloud.client.database.entity.model.ShareeKey
+import com.nextcloud.client.database.entity.toOCCapability
+import com.nextcloud.model.HTTPStatusCodes
+import com.owncloud.android.datamodel.FileDataStorageManager
+import com.owncloud.android.datamodel.OCFile
+import com.owncloud.android.lib.common.OwnCloudClient
+import com.owncloud.android.lib.common.utils.Log_OC
+import com.owncloud.android.lib.resources.files.ExistenceCheckRemoteOperation
+import com.owncloud.android.lib.resources.files.model.RemoteFile
+import com.owncloud.android.lib.resources.shares.OCShare
+import com.owncloud.android.lib.resources.status.OCCapability
+import com.owncloud.android.operations.upload.RemoteFileExistence
+import com.owncloud.android.utils.FileStorageUtils
+import com.owncloud.android.utils.MimeTypeUtil
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.File
+
+private const val SHARE_PATH_QUERY_CHUNK_SIZE = 400
+private val conflictNameCounterSelectionRegex = Regex("""(.*)\((\d+)\)$""", RegexOption.MULTILINE)
+
+/**
+ * Detects sharee additions/removals (by userId + shareType) for [remoteFiles], compared to what is stored
+ * locally.
+ */
+fun FileDataStorageManager.areShareesChanged(remoteFiles: List<RemoteFile>): Boolean {
+    if (remoteFiles.isEmpty()) {
+        return false
+    }
+
+    val newShareesByPath = remoteFiles.asSequence()
+        .filter { it.remotePath != null }
+        .groupBy { it.remotePath as String }
+        .mapValues { (_, files) ->
+            files.asSequence()
+                .flatMap { file -> file.sharees.orEmpty().asSequence() }
+                .mapNotNull { sharee -> sharee.shareType?.let { "${sharee.userId}:${it.value}" } }
+                .toSet()
+        }
+
+    val existingShareesByPath = newShareesByPath.keys
+        .chunked(SHARE_PATH_QUERY_CHUNK_SIZE)
+        .flatMap { chunk -> shareDao.getShareeKeys(chunk, user.accountName, ShareeKey.shareableShareTypeValues) }
+        .groupBy(ShareeKey::path) { "${it.shareWith}:${it.shareType}" }
+        .mapValues { (_, keys) -> keys.toSet() }
+
+    return newShareesByPath.keys.any { path ->
+        newShareesByPath[path].orEmpty() != existingShareesByPath[path].orEmpty()
+    }
+}
+
+suspend fun FileDataStorageManager.saveShares(shares: List<OCShare>, accountName: String) {
+    withContext(Dispatchers.IO) {
+        val entities = shares.map { share ->
+            share.toEntity(accountName)
+        }
+
+        shareDao.insertAll(entities)
+    }
+}
+
+private const val GALLERY_DB_CHUNK_SIZE = 500
+
+suspend fun FileDataStorageManager.getGalleryItemsPageSuspended(
+    pathPrefix: String,
+    mimeFilter: String?,
+    limit: Int
+): List<OCFile> {
+    val result = ArrayList<OCFile>(minOf(limit, GALLERY_DB_CHUNK_SIZE))
+    var offset = 0
+
+    while (offset < limit) {
+        val chunkLimit = minOf(GALLERY_DB_CHUNK_SIZE, limit - offset)
+        val entities = fileDao.getGalleryItemsPageSuspended(
+            user.accountName,
+            pathPrefix,
+            mimeFilter,
+            chunkLimit,
+            offset
+        )
+
+        entities.mapTo(result) { createFileInstance(it) }
+        offset += entities.size
+
+        if (entities.size < chunkLimit) break
+    }
+
+    return result
+}
+
+fun FileDataStorageManager.searchFilesByName(file: OCFile, accountName: String, query: String): List<OCFile> =
+    fileDao.searchFilesInFolder(file.fileId, accountName, query).map {
+        createFileInstance(it)
+    }
+
+fun FileDataStorageManager.getDecryptedPath(file: OCFile): String {
+    val paths = mutableListOf<String>()
+    var entity = fileDao.getFileByEncryptedRemotePath(file.remotePath, user.accountName)
+
+    while (entity != null) {
+        entity.name?.takeIf { it.isNotEmpty() }?.let {
+            paths.add(it.removePrefix(OCFile.PATH_SEPARATOR))
+        }
+        entity = entity.parent?.let { fileDao.getFileById(it) } ?: break
+    }
+
+    return paths
+        .reversed()
+        .joinToString(OCFile.PATH_SEPARATOR)
+}
+
+fun FileDataStorageManager.getNonEncryptedSubfolders(id: Long, accountName: String): List<OCFile> =
+    fileDao.getNonEncryptedSubfolders(id, accountName).map {
+        createFileInstance(it)
+    }
+
+suspend fun FileDataStorageManager.getCapabilitiesByAccountName(accountName: String): OCCapability =
+    capabilityDao.getByAccountName(accountName).toOCCapability()
+
+@Suppress("ReturnCount")
+fun FileDataStorageManager.moveFiles(ocFile: OCFile?, targetPath: String, targetParentPath: String) {
+    Log_OC.d(
+        FileDataStorageManager.TAG,
+        (
+            "moveLocalFile ==> ocFile: " +
+                (ocFile?.remotePath) +
+                " targetPath: " +
+                targetPath +
+                " targetParentPath: " +
+                targetParentPath
+            )
+    )
+
+    if (ocFile == null) {
+        Log_OC.e(FileDataStorageManager.TAG, "moveLocalFile: file is null, skipping")
+        return
+    }
+
+    if (!ocFile.fileExists()) {
+        Log_OC.e(FileDataStorageManager.TAG, "moveLocalFile: file does not exist, skipping")
+        return
+    }
+
+    if (OCFile.ROOT_PATH == ocFile.fileName) {
+        Log_OC.w(FileDataStorageManager.TAG, "moveLocalFile: cannot move root path")
+        return
+    }
+
+    if (ocFile.remotePath == targetPath) {
+        Log_OC.w(FileDataStorageManager.TAG, "moveLocalFile: source and target paths are identical, skipping")
+        return
+    }
+
+    val targetParent = getFileByPath(targetParentPath)
+    if (targetParent == null) {
+        Log_OC.e(FileDataStorageManager.TAG, "moveLocalFile: target parent folder not found: $targetParentPath")
+        return
+    }
+
+    if (!targetParent.isFolder) {
+        Log_OC.e(FileDataStorageManager.TAG, "moveLocalFile: target parent is not a folder: $targetParentPath")
+        return
+    }
+
+    val oldPath: String = ocFile.remotePath
+    val accountName = user.accountName
+    val defaultSavePath = FileStorageUtils.getSavePath(accountName)
+
+    val originalMediaPaths =
+        fileDao.moveFilesInDb(oldPath, targetPath, defaultSavePath, targetParent.fileId, accountName)
+
+    if (!moveLocalFiles(accountName, ocFile, defaultSavePath, targetPath)) return
+
+    for (originalMediaPath in originalMediaPaths) {
+        deleteFileInMediaScan(originalMediaPath)
+        val newMediaPath = defaultSavePath + targetPath + originalMediaPath.substring(
+            (defaultSavePath + oldPath).length
+        )
+        FileDataStorageManager.triggerMediaScan(newMediaPath)
+    }
+}
+
+/**
+ * Finds a suitable file name to resolve a conflict.
+ * Tries to concatenate a number to the name until it finds a non-existent one.
+ * E.g. for "file.txt" it will propose "file (2).txt". If that exists, then "file (3).txt" and so on.
+ * E.g. for "folder" it will propose "folder (2)/". If that exists, then "folder (3)/" and so on.
+ *
+ * @return the new remote path, or null if the user is unauthorized in the provided path
+ */
+private const val MAX_CONFLICT_RESOLUTION_ATTEMPTS = 10
+
+@Suppress("ReturnCount")
+fun getRemotePathForConflictResolution(client: OwnCloudClient, remotePath: String, fileName: String): String? {
+    var name = fileName
+    repeat(MAX_CONFLICT_RESOLUTION_ATTEMPTS) {
+        name = generateFileNameForConflictResolution(name)
+        val newPath = "$remotePath$name"
+
+        val result = ExistenceCheckRemoteOperation(newPath, false).execute(client)
+        // 404 (File not found) case is a valid one in this case
+        if (!result.isSuccess && result.httpCode != HTTPStatusCodes.NOT_FOUND.code) return null
+
+        when (RemoteFileExistence.fromExistenceCheck(result)) {
+            RemoteFileExistence.DOES_NOT_EXIST -> return newPath
+            RemoteFileExistence.UNAUTHORIZED -> return null
+            else -> Unit // exists, try next name
+        }
+    }
+    return null
+}
+
+fun generateFileNameForConflictResolution(fileName: String): String {
+    val isFolder = fileName.endsWith(OCFile.PATH_SEPARATOR)
+    val separator =
+        if (isFolder) {
+            OCFile.PATH_SEPARATOR
+        } else if (fileName.indexOf(".") > 0) {
+            "."
+        } else {
+            ""
+        }
+    var nameFirstPart =
+        if (separator.isNotEmpty()) {
+            fileName.substringBeforeLast(separator)
+        } else {
+            fileName
+        }
+    var nameLastPart =
+        if (separator.isNotEmpty()) {
+            fileName.substringAfterLast(separator, "")
+        } else {
+            "" // Extension or path separator
+        }
+    if (nameLastPart.isNotEmpty() || isFolder) nameLastPart = "$separator$nameLastPart"
+    nameFirstPart = if (conflictNameCounterSelectionRegex.matches(nameFirstPart)) {
+        // Already a resolved conflict (i.e. "file (1).txt"). Update the number.
+        conflictNameCounterSelectionRegex.replace(nameFirstPart, transform = { m ->
+            val baseName = m.groups[1]?.value
+            val number = m.groups[2]?.value?.toInt() ?: 0
+            "$baseName(${number + 1})"
+        })
+    } else {
+        // Add the number
+        "$nameFirstPart (1)"
+    }
+    return "$nameFirstPart$nameLastPart"
+}
+
+@Suppress("ReturnCount")
+private fun moveLocalFiles(accountName: String, ocFile: OCFile, defaultSavePath: String, targetPath: String): Boolean {
+    val localFile = File(FileStorageUtils.getDefaultSavePathFor(accountName, ocFile))
+    if (!localFile.exists()) {
+        Log_OC.d(FileDataStorageManager.TAG, "moveLocalFile: no local file to move at " + localFile.absolutePath)
+        return false
+    }
+
+    val targetFile = File(defaultSavePath + targetPath)
+    val targetFolder = targetFile.getParentFile()
+    if (targetFolder != null && !targetFolder.exists() && !targetFolder.mkdirs()) {
+        Log_OC.e(
+            FileDataStorageManager.TAG,
+            "moveLocalFile: failed to create parent folder " + targetFolder.absolutePath
+        )
+    }
+
+    if (!localFile.renameTo(targetFile)) {
+        Log_OC.e(
+            FileDataStorageManager.TAG,
+            (
+                "moveLocalFile: failed to rename " + localFile.absolutePath +
+                    " to " + targetFile.absolutePath
+                )
+        )
+        return false
+    }
+
+    return true
+}
+
+private fun FileDao.moveFilesInDb(
+    oldPath: String,
+    targetPath: String,
+    defaultSavePath: String,
+    targetParentId: Long,
+    accountName: String
+): List<String> {
+    val entities = getFolderWithDescendants("$oldPath%", accountName)
+    val oldStoragePrefix = defaultSavePath + oldPath
+    val newStoragePrefix = defaultSavePath + targetPath
+
+    val originalMediaPaths = entities
+        .filter { MimeTypeUtil.isMedia(it.contentType) && it.storagePath?.startsWith(oldStoragePrefix) == true }
+        .mapNotNull { it.storagePath }
+
+    val updated = entities.map { entity ->
+        val currentPath = entity.path.orEmpty()
+        val newPath = targetPath + currentPath.substring(oldPath.length)
+        entity.copy(
+            path = newPath,
+            pathDecrypted = if (entity.isEncrypted == 1) entity.pathDecrypted else newPath,
+            storagePath = if (entity.storagePath?.startsWith(oldStoragePrefix) == true) {
+                newStoragePrefix + entity.storagePath.substring(oldStoragePrefix.length)
+            } else {
+                entity.storagePath
+            },
+            parent = if (currentPath == oldPath) targetParentId else entity.parent
+        )
+    }
+
+    updateAll(updated)
+    return originalMediaPaths
+}
